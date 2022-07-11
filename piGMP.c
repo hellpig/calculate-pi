@@ -53,19 +53,19 @@ which let me compile via...
 
 On Windows (using Cygwin with gcc-core and libgmp-devel)...
   gcc -O3 piGMP.c -lgmp -lm
-I would worry a bit more about when running this on Windows because GMP uses
+I would worry a bit more when running this on Windows because GMP uses
 "unsigned long int", which is only 32-bits on 64-bit Windows.
 
 
 To run...
   ./a.out digits [BASE]
 where digits will be int32_t and is the fractional digits of pi in base BASE.
-If BASE is not supplied, it default to base 10.
+If BASE is not supplied, it defaults to base 10.
 BASE may vary from 2 to 62.
 Note that the arguments are to be entered in base 10.
 
 Run time is proportional to digits^2
-A million base-10 digits will take less than half an hour, with the final output being...
+A million base-10 digits should take about half an hour, with the final output being...
   ...46460422090106105779458151
 Keep in mind that the final 1 may be a 0 that was rounded up.
 Running extra digits shows that this final 1 is, in fact, a 1.
