@@ -138,7 +138,7 @@ int main(int argc, char *argv[]) {
 
     The tiny multiplier is just a cushion against floating-point roundoff in
     these sizing estimates. It increases work by far less than a percent.
-    Not an issue for int32_t, but worth fixing!
+    Not needed for int32_t, but worth fixing!
 
     Note that you need 4 times more prec_d bits than steps because BBP does 4 bits per step
   */
