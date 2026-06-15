@@ -30,11 +30,8 @@ The more useful thing is to find which final k is needed given digit...
 So, for 1000 digits, you get k=825.1, so 826 should be safe enough.
 Note that you can safely approximate the solution for k as...
   k = digit * log2(10) / 4
-though I'd still add on 10 just to be safe...
-  k = digit * log2(10) / 4 + 10
-Since digit * log2(10) suffers from severe roundoff error when converting
-to integer for very large digit, do...
-  k = (digit * log2(10) / 4 + 10) * 1.0001
+though I'd still add on guard_bits just to be safe...
+  k = (digit * log2(10) + guard_bits) / 4
 
 
 GMP manual...
@@ -55,6 +52,13 @@ On Windows (using Cygwin with gcc-core and libgmp-devel)...
   gcc -O3 piGMP.c -lgmp -lm
 I would worry a bit more when running this on Windows because GMP uses
 "unsigned long int", which is only 32-bits on 64-bit Windows.
+
+
+The code first checks whether the computed number of steps fits in int32_t.
+On systems where unsigned long int is 64-bit, this is the relevant first limit.
+On systems where unsigned long int is only 32-bit, the GMP function mpf_div_ui
+may hit its unsigned-long denominator limit earlier, because it requires
+8*k + 6 <= ULONG_MAX. The code checks for that too.
 
 
 To run...
@@ -83,13 +87,11 @@ the first 3 as a digit (we have a million digits of the fractional part of pi).
 #include <stdlib.h>
 #include <stdio.h>
 
-// do I need these?
-#include <stdint.h>
-#include <inttypes.h>
+#include <stdint.h>  // for int32_t and uint64_t
 
 #include <string.h>
 
-#include <math.h>   // for log()
+#include <math.h>   // for log2() and ceil()
 
 #include <gmp.h>
 
@@ -122,11 +124,65 @@ int main(int argc, char *argv[]) {
 
 
 
-  int32_t steps = ((double)digits * log((double)BASE) / (4.0 * log(2.0)) + 10.0)*1.0001;
+
+
+
+
+  // some temporary variables
+  double frac_bits_d = (double)digits * log2((double)BASE);
+  double guard_bits_d = 64.0 + ceil(log2(frac_bits_d + 1.0));   // no magic to this, it just grows with number of needed bits
+
+
+  /*
+    make the important variables: steps_d and prec_d
+
+    The tiny multiplier is just a cushion against floating-point roundoff in
+    these sizing estimates. It increases work by far less than a percent.
+    Not an issue for int32_t, but worth fixing!
+
+    Note that you need 4 times more prec_d bits than steps because BBP does 4 bits per step
+  */
+  double steps_d = ceil(((frac_bits_d + guard_bits_d) / 4.0) * 1.000000001);  // steps
+  double prec_d  = ceil((frac_bits_d + guard_bits_d) * 1.000000001);   // GMP precision in bits
+
+
+
+  int32_t steps;
   int32_t k;
 
-  /* the "+10" is for erring on the side of safety */
-  mpf_set_default_prec( (mp_bitcnt_t)(digits*log((double)BASE)/log(2.0) + 10.0) );
+
+
+
+  // Important: check to see if things will overflow!
+
+  if(steps_d >= 2147483647.0) {
+    printf(" Error: steps does not fit in int32_t\n");
+    return -1;
+  }
+
+  steps = (int32_t)steps_d;
+
+  unsigned long ULONG_MAX_simple = (unsigned long)-1;
+
+  /* mpf_div_ui takes an unsigned long int, so make sure 8*k+6 fits */
+  if((uint64_t)(steps - 1) > ((uint64_t)ULONG_MAX_simple - 6) / 8) {
+    printf(" Error: 8*k+6 does not fit in unsigned long int for mpf_div_ui\n");
+    return -1;
+  }
+
+  mp_bitcnt_t MP_BITCNT_MAX_simple = (mp_bitcnt_t)-1;
+
+  if(prec_d >= (double)MP_BITCNT_MAX_simple) {
+    printf(" Error: precision does not fit in mp_bitcnt_t\n");
+    return -1;
+  }
+
+  mpf_set_default_prec((mp_bitcnt_t)prec_d);
+
+
+
+
+
 
   mpf_t n;
   mpf_init(n);  // initialized to 0
@@ -149,9 +205,9 @@ int main(int argc, char *argv[]) {
 
 
   for(k = steps - 1; k >= 0; k--){    // iterate backwards to reduce roundoff error
+    mpf_div_2exp(n, n, 4);  // n /= 16
 
-    /* n += ( 4/(8*k+1) - 2/(8*k + 4) - 1/(8*k+5) - 1/(8*k+6) ) / 16^k  */
-
+    /* temp = a_k */
     mpf_div_ui(temp, one, (uint64_t)8*k+1);
     mpf_mul_2exp(temp, temp, 2);             // multiply by 4
 
@@ -165,10 +221,7 @@ int main(int argc, char *argv[]) {
     mpf_div_ui(temp2, one, (uint64_t)8*k+6);
     mpf_sub(temp, temp, temp2);
 
-    mpf_div_2exp(temp, temp, (uint64_t)4*k);   // divide by 16^k
-
     mpf_add(n, n, temp);
-
   }
 
   // clean up as much as possible
@@ -183,9 +236,9 @@ int main(int argc, char *argv[]) {
   // subtract 2 to make the integer part equal to 1 (so leading zeros of fractional part in base 2 print)
   mpf_sub_ui(n, n, 2);
 
-  mp_exp_t exp[10];      // this is never used
+  mp_exp_t exp;      // needed by mpf_get_str, but ignored
   char* string = (char*)malloc(digits+2);
-  mpf_get_str(string, exp, BASE, digits+1, n);   // string has no radix point
+  mpf_get_str(string, &exp, BASE, digits+1, n);   // string has no radix point
   string[0] = '.';       // replace the leading 1 with a radix point
   mpf_clear(n);
 
